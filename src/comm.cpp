@@ -20,7 +20,7 @@
  */
 
 #include "comm.h"
-
+#include "errno.h"
 #include "debug.h"
 
 reqid_t prepare_request(char *buf, comm_request_t type, ...) {

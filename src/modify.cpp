@@ -54,14 +54,6 @@
 #include "predictor.h"
 #include "util.h"
 
-CUresult CUDAAPI cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags);
-CUresult CUDAAPI cuMemAlloc_hook( CUdeviceptr* dptr, size_t bytesize) {
-  cuMemAlloc(dptr,bytesize); 
-  printf("allocate %zu bytes.\n", bytesize);
-
-  return CUDA_SUCCESS;
-
-}
 extern "C" {
 void *__libc_dlsym(void *map, const char *name);
 }
@@ -71,22 +63,19 @@ void *__libc_dlopen_mode(const char *name, int mode);
 
 #define STRINGIFY(x) #x
 #define CUDA_SYMBOL_STRING(x) STRINGIFY(x)
-void *libdlHandle = __libc_dlopen_mode("libdl.so", RTLD_LAZY);
-void *libcudaHandle = __libc_dlopen_mode("libcuda.so", RTLD_LAZY);
-void *libcudnnHandle = __libc_dlopen_mode("libcudnn.so", RTLD_LAZY);
+
 typedef void *(*fnDlsym)(void *, const char *);
 
 static void *real_dlsym(void *handle, const char *symbol) {
-  typedef void *(*fnDlsym)(void *, const char *);
-    static fnDlsym internal_dlsym = (fnDlsym)__libc_dlsym(libdlHandle, "dlsym");
-    return (*internal_dlsym)(handle, symbol);
+  static fnDlsym internal_dlsym =
+      (fnDlsym)__libc_dlsym(__libc_dlopen_mode("libdl.so.2", RTLD_LAZY), "dlsym");
+  return (*internal_dlsym)(handle, symbol);
 }
 
 struct hookInfo {
   int debug_mode;
   void *preHooks[NUM_HOOK_SYMBOLS];
   void *postHooks[NUM_HOOK_SYMBOLS];
-  void *func_actual[NUM_HOOK_SYMBOLS];
   int call_count[NUM_HOOK_SYMBOLS];
 
   hookInfo() {
@@ -110,48 +99,9 @@ void *dlsym(void *handle, const char *symbol) {
   if (strncmp(symbol, "cu", 2) != 0) {
     return (real_dlsym(handle, symbol));
   }
-  if (strcmp(symbol, CUDA_SYMBOL_STRING(cuGetProcAddress)) == 0) {
+  if (strcmp(symbol, SYMBOL_STRING(cuGetProcAddress)) == 0) {
         return (void *)(&cuGetProcAddress);
-  }else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemAlloc)) == 0) {
-    return (void *)(&cuMemAlloc);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemAllocManaged)) == 0) {
-    return (void *)(&cuMemAllocManaged);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemAllocPitch)) == 0) {
-    return (void *)(&cuMemAllocPitch);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemFree)) == 0) {
-    return (void *)(&cuMemFree);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuArrayCreate)) == 0) {
-    return (void *)(&cuArrayCreate);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuArray3DCreate)) == 0) {
-    return (void *)(&cuArray3DCreate);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuArrayDestroy)) == 0) {
-    return (void *)(&cuArrayDestroy);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMipmappedArrayCreate)) == 0) {
-    return (void *)(&cuMipmappedArrayCreate);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMipmappedArrayDestroy)) == 0) {
-    return (void *)(&cuMipmappedArrayDestroy);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuLaunchKernel)) == 0) {
-    return (void *)(&cuLaunchKernel);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuLaunchCooperativeKernel)) == 0) {
-    return (void *)(&cuLaunchCooperativeKernel);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemGetInfo)) == 0) {
-    return (void *)(&cuMemGetInfo);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuCtxSynchronize)) == 0) {
-    return (void *)(&cuCtxSynchronize);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyAtoH)) == 0) {
-    return (void *)(&cuMemcpyAtoH);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyAtoHAsync)) == 0) {
-    return (void *)(&cuMemcpyAtoHAsync);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyDtoH)) == 0) {
-    return (void *)(&cuMemcpyDtoH);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyDtoHAsync)) == 0) {
-    return (void *)(&cuMemcpyDtoHAsync);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyHtoA)) == 0) {
-    return (void *)(&cuMemcpyHtoA);
-  } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyHtoD)) == 0) {
-    return (void *)(&cuMemcpyHtoD);
   }
-
   
   // omit cuDeviceTotalMem here so there won't be a deadlock in cudaEventCreate when we are in
   // initialize(). Functions called by client are still being intercepted.
@@ -513,7 +463,6 @@ CUresult cuLaunchCooperativeKernel_prehook(CUfunction f, unsigned int gridDimX,
                                            unsigned int blockDimX, unsigned int blockDimY,
                                            unsigned int blockDimZ, unsigned int sharedMemBytes,
                                            CUstream hStream, void **kernelParams) {
-  DEBUG("cuLaunchCooperativeKernel PREHOOK");
   return cuLaunchKernel_prehook(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                 sharedMemBytes, hStream, kernelParams, NULL);
 }
@@ -529,14 +478,12 @@ CUresult cuMemFree_prehook(CUdeviceptr ptr) {
     allocation_map.erase(ptr);
   }
   pthread_mutex_unlock(&allocation_mutex);
-  DEBUG("Freeing memory");
   return CUDA_SUCCESS;
 }
 
-CUresult cuArrayDestroy_prehook(CUarray hArray) { DEBUG("cu arrary destroy"); return cuMemFree_prehook((CUdeviceptr)hArray); }
+CUresult cuArrayDestroy_prehook(CUarray hArray) { return cuMemFree_prehook((CUdeviceptr)hArray); }
 
 CUresult cuMipmappedArrayDestroy_prehook(CUmipmappedArray hMipmappedArray) {
-  DEBUG("MIPMAPPEDARRAY DESTROY");
   return cuMemFree_prehook((CUdeviceptr)hMipmappedArray);
 }
 
@@ -562,6 +509,7 @@ CUresult cuMemAlloc_posthook(CUdeviceptr *dptr, size_t bytesize) {
     ERROR("Allocate too much memory!");
     return CUDA_ERROR_OUT_OF_MEMORY;
   }
+
   pthread_mutex_lock(&allocation_mutex);
   allocation_map[*dptr] = bytesize;
   gpu_mem_used += bytesize;
@@ -577,7 +525,6 @@ CUresult cuMemAllocManaged_prehook(CUdeviceptr *dptr, size_t bytesize, unsigned 
 
 CUresult cuMemAllocManaged_posthook(CUdeviceptr *dptr, size_t bytesize, unsigned int flags) {
   // TODO: This function access the unified memory. Behavior needs clarification.
-  DEBUG("managed");
   return CUDA_SUCCESS;
 }
 
@@ -587,7 +534,6 @@ CUresult cuMemAllocPitch_prehook(CUdeviceptr *dptr, size_t *pPitch, size_t Width
 }
 CUresult cuMemAllocPitch_posthook(CUdeviceptr *dptr, size_t *pPitch, size_t WidthInBytes,
                                   size_t Height, unsigned int ElementSizeBytes) {
-  DEBUG("pitch");
   return cuMemAlloc_posthook(dptr, (*pPitch) * Height);
 }
 
@@ -611,7 +557,6 @@ CUresult cuArrayCreate_prehook(CUarray *pHandle, const CUDA_ARRAY_DESCRIPTOR *pA
   size_t totalMemoryNumber =
       pAllocateArray->Width * pAllocateArray->Height * pAllocateArray->NumChannels;
   size_t formatSize = CUarray_format_to_size_t(pAllocateArray->Format);
-  DEBUG("CU ARRARY CREATE");
   return cuMemAlloc_prehook((CUdeviceptr *)pHandle, totalMemoryNumber * formatSize);
 }
 
@@ -619,7 +564,6 @@ CUresult cuArrayCreate_posthook(CUarray *pHandle, const CUDA_ARRAY_DESCRIPTOR *p
   size_t totalMemoryNumber =
       pAllocateArray->Width * pAllocateArray->Height * pAllocateArray->NumChannels;
   size_t formatSize = CUarray_format_to_size_t(pAllocateArray->Format);
-  DEBUG("CU ARRAY CREATE");
   return cuMemAlloc_posthook((CUdeviceptr *)pHandle, totalMemoryNumber * formatSize);
 }
 
@@ -634,7 +578,6 @@ CUresult cuArray3DCreate_posthook(CUarray *pHandle, const CUDA_ARRAY3D_DESCRIPTO
   size_t totalMemoryNumber = pAllocateArray->Width * pAllocateArray->Height *
                              pAllocateArray->Depth * pAllocateArray->NumChannels;
   size_t formatSize = CUarray_format_to_size_t(pAllocateArray->Format);
-  DEBUG("CUARRARY 3D CREATE");
   return cuMemAlloc_posthook((CUdeviceptr *)pHandle, totalMemoryNumber * formatSize);
 }
 
@@ -649,13 +592,11 @@ CUresult cuMipmappedArrayCreate_posthook(CUmipmappedArray *pHandle,
                                          const CUDA_ARRAY3D_DESCRIPTOR *pMipmappedArrayDesc,
                                          unsigned int numMipmapLevels) {
   // TODO: check mipmap array size
-  DEBUG("CU MIPMAPPED ARRARY CREATE");
   return CUDA_SUCCESS;
 }
 
 CUresult cuCtxSynchronize_posthook(void) {
   host_sync_call("cuCtxSynchronize");
-  DEBUG("cuCtxSync");
   return CUDA_SUCCESS;
 }
 
@@ -667,7 +608,6 @@ CUresult cuMemcpyAtoH_posthook(void *dstHost, CUarray srcArray, size_t srcOffset
 
 CUresult cuMemcpyDtoH_posthook(void *dstHost, CUdeviceptr srcDevice, size_t ByteCount) {
   host_sync_call("cuMemcpyDtoH");
-  DEBUG("COPY from device to host");
   return CUDA_SUCCESS;
 }
 
@@ -680,7 +620,6 @@ CUresult cuMemcpyHtoA_posthook(CUarray dstArray, size_t dstOffset, const void *s
 CUresult cuMemcpyHtoD_posthook(CUarray dstArray, size_t dstOffset, const void *srcHost,
                                size_t ByteCount, CUstream hStream) {
   host_sync_call("cuMemcpyHtoD");
-  DEBUG("COPY from host to device");
   return CUDA_SUCCESS;
 }
 
@@ -735,222 +674,7 @@ void initialize() {
 
 CUstream hStream;  // redundent variable used for macro expansion
 
-#define CU_HOOK_GENERATE_INTERCEPT(hookname, hooksymbol, funcname, params, ...)                     \
-  CUresult CUDAAPI hookname params {                                                      \
-    if (hook_inf.debug_mode) DEBUG("hooked function: " CUDA_SYMBOL_STRING(hooksymbol));   \
-    pthread_once(&init_done, initialize);                                                 \
-                                                                                          \
-    static void *real_func = (void *)real_dlsym(RTLD_NEXT, CUDA_SYMBOL_STRING(funcname)); \
-    CUresult result = CUDA_SUCCESS;                                                       \
-                                                                                          \
-    if (hook_inf.debug_mode) hook_inf.call_count[hooksymbol]++;                           \
-                                                                                          \
-    if (hook_inf.preHooks[hooksymbol])                                                    \
-      result = ((CUresult CUDAAPI(*) params)hook_inf.preHooks[hooksymbol])(__VA_ARGS__);  \
-    if (result != CUDA_SUCCESS) return (result);                                          \
-                                                                                          \
-    result = ((CUresult CUDAAPI(*) params)real_func)(__VA_ARGS__);                        \
-                                                                                          \
-    if (hook_inf.postHooks[hooksymbol] && result == CUDA_SUCCESS)                         \
-      result = ((CUresult CUDAAPI(*) params)hook_inf.postHooks[hooksymbol])(__VA_ARGS__); \
-                                                                                          \
-    return (result);                                                                      \
-  }
-
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemcpyAtoH, CU_HOOK_MEMCPY_ATOH, cuMemcpyAtoH,
-                           (void *dstHost, CUarray srcArray, size_t srcOffset, size_t ByteCount),
-                           dstHost, srcArray, srcOffset, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemcpyDtoH, CU_HOOK_MEMCPY_DTOH, cuMemcpyDtoH,
-                           (void *dstHost, CUdeviceptr srcDevice, size_t ByteCount), dstHost,
-                           srcDevice, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemcpyHtoA, CU_HOOK_MEMCPY_HTOA, cuMemcpyHtoA,
-                           (CUarray dstArray, size_t dstOffset, const void *srcHost,
-                            size_t ByteCount),
-                           dstArray, dstOffset, srcHost, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemcpyHtoD, CU_HOOK_MEMCPY_HTOD, cuMemcpyHtoD,
-                           (CUdeviceptr dstDevice, const void *srcHost, size_t ByteCount),
-                           dstDevice, srcHost, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuCtxSynchronize, CU_HOOK_CTX_SYNC, cuCtxSynchronize, (void))
-
-// cuda driver alloc/free APIs
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemAlloc, CU_HOOK_MEM_ALLOC, cuMemAlloc, (CUdeviceptr * dptr, size_t bytesize),
-                           dptr, bytesize)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemAllocManaged, CU_HOOK_MEM_ALLOC_MANAGED, cuMemAllocManaged,
-                           (CUdeviceptr * dptr, size_t bytesize, unsigned int flags), dptr,
-                           bytesize, flags)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemAllocPitch, CU_HOOK_MEM_ALLOC_PITCH, cuMemAllocPitch,
-                           (CUdeviceptr * dptr, size_t *pPitch, size_t WidthInBytes, size_t Height,
-                            unsigned int ElementSizeBytes),
-                           dptr, pPitch, WidthInBytes, Height, ElementSizeBytes)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMemFree, CU_HOOK_MEM_FREE, cuMemFree, (CUdeviceptr dptr), dptr)
-
-// cuda driver array/array_destroy APIs
-CU_HOOK_GENERATE_INTERCEPT(hook_cuArrayCreate, CU_HOOK_ARRAY_CREATE, cuArrayCreate,
-                           (CUarray * pHandle, const CUDA_ARRAY_DESCRIPTOR *pAllocateArray),
-                           pHandle, pAllocateArray)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuArray3DCreate, CU_HOOK_ARRAY3D_CREATE, cuArray3DCreate,
-                           (CUarray * pHandle, const CUDA_ARRAY3D_DESCRIPTOR *pAllocateArray),
-                           pHandle, pAllocateArray)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMipmappedArrayCreate, CU_HOOK_MIPMAPPED_ARRAY_CREATE, cuMipmappedArrayCreate,
-                           (CUmipmappedArray * pHandle,
-                            const CUDA_ARRAY3D_DESCRIPTOR *pMipmappedArrayDesc,
-                            unsigned int numMipmapLevels),
-                           pHandle, pMipmappedArrayDesc, numMipmapLevels)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuArrayDestroy, CU_HOOK_ARRAY_DESTROY, cuArrayDestroy, (CUarray hArray), hArray)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuMipmappedArrayDestroy, CU_HOOK_MIPMAPPED_ARRAY_DESTROY, cuMipmappedArrayDestroy,
-                           (CUmipmappedArray hMipmappedArray), hMipmappedArray)
-
-// cuda driver kernel launch APIs
-CU_HOOK_GENERATE_INTERCEPT(hook_cuLaunchKernel, CU_HOOK_LAUNCH_KERNEL, cuLaunchKernel,
-                           (CUfunction f, unsigned int gridDimX, unsigned int gridDimY,
-                            unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
-                            unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream,
-                            void **kernelParams, void **extra),
-                           f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                           sharedMemBytes, hStream, kernelParams, extra)
-CU_HOOK_GENERATE_INTERCEPT(hook_cuLaunchCooperativeKernel,CU_HOOK_LAUNCH_COOPERATIVE_KERNEL, cuLaunchCooperativeKernel,
-                           (CUfunction f, unsigned int gridDimX, unsigned int gridDimY,
-                            unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
-                            unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream,
-                            void **kernelParams),
-                           f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-                           sharedMemBytes, hStream, kernelParams)
-
-
-
-// cuda driver mem info APIs
-CUresult CUDAAPI cuDeviceTotalMem(size_t *bytes, CUdevice dev) {
-  pthread_once(&init_done, initialize);
-  auto mem_info = get_gpu_memory_info();
-  if (hook_inf.debug_mode) hook_inf.call_count[CU_HOOK_DEVICE_TOTOAL_MEM]++;
-  *bytes = mem_info.second;
-  return CUDA_SUCCESS;
-}
-
-CUresult CUDAAPI cuMemGetInfo(size_t *gpu_mem_free, size_t *gpu_mem_total) {
-  pthread_once(&init_done, initialize);
-  auto mem_info = get_gpu_memory_info();
-  if (hook_inf.debug_mode) hook_inf.call_count[CU_HOOK_MEM_INFO]++;
-  *gpu_mem_free = mem_info.first;
-  *gpu_mem_total = mem_info.second;
-  return CUDA_SUCCESS;
-}
-
-
-
-
-CUresult CUDAAPI cuGetProcAddress(const char *symbol, void **pfn, int cudaVersion, cuuint64_t flags) {
-#ifdef _DEBUG
-    //printf("Enter %s\n", SYMBOL_STRING(cuGetProcAddress));
-    //printf("symbol %s, cudaVersion %d, flags %lu\n", symbol, cudaVersion, flags);
-#endif
-    typedef decltype(&cuGetProcAddress) funcType;
-    funcType actualFunc;
-    if(!hook_inf.func_actual[CU_HOOK_GET_PROC_ADDRESS])
-        actualFunc = (funcType)real_dlsym(libcudaHandle, CUDA_SYMBOL_STRING(cuGetProcAddress));
-    else
-        actualFunc = (funcType)hook_inf.func_actual[CU_HOOK_GET_PROC_ADDRESS];
-    CUresult result = actualFunc(symbol, pfn, cudaVersion, flags);
-
-    if(strcmp(symbol, CUDA_SYMBOL_STRING(cuGetProcAddress)) == 0) {
-        hook_inf.func_actual[CU_HOOK_GET_PROC_ADDRESS] = *pfn;
-        *pfn = (void*)(&cuGetProcAddress);
-
-#pragma push_macro("cuMemAlloc")
-#undef cuMemAlloc
-    } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemAlloc)) == 0) {
-#pragma pop_macro("cuMemAlloc")
-        hook_inf.func_actual[CU_HOOK_MEM_ALLOC] = *pfn;
-        *pfn = (void *)(&hook_cuMemAlloc);
-#pragma push_macro("cuMemAllocManaged")
-#undef cuMemAllocManaged
-    } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemAllocManaged)) == 0) {
-#pragma pop_macro("cuMemAllocManaged")
-        *pfn = (void *)(&hook_cuMemAllocManaged);
-#pragma push_macro("cuMemAllocPitch")
-#undef cuMemAllocPitch
-    } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemAllocPitch)) == 0) {
-#pragma pop_macro("cuMemAllocPitch")
-        *pfn = (void *)(&hook_cuMemAllocPitch);
-#pragma push_macro("cuMemFree")
-#undef cuMemFree
-    } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemFree)) == 0) {
-#pragma pop_macro("cuMemFree")
-        *pfn = (void *)(&hook_cuMemFree);
-#pragma push_macro("cuCtxSynchronize")
-#undef cuCtxSynchronize
-    } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuCtxSynchronize)) == 0) {
-#pragma pop_macro("cuCtxSynchronize")
-        *pfn = (void *)(&hook_cuCtxSynchronize);
-#pragma push_macro("cuMemcpyHtoD")
-#undef cuMemcpyHtoD
-    } else if (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyHtoD)) == 0) {
-#pragma pop_macro("cuMemcpyHtoD")
-        *pfn = (void *)(&hook_cuMemcpyHtoD);
-#pragma push_macro("cuMemcpyDtoH")
-#undef cuMemcpyDtoH
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyDtoH)) == 0) {
-#pragma pop_macro("cuMemcpyDtoH")
-        *pfn = (void *)(&hook_cuMemcpyDtoH);
-#pragma push_macro("cuMemcpyAtoH")
-#undef cuMemcpyDtoH
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyAtoH)) == 0) {
-#pragma pop_macro("cuMemcpyAtoH")
-        *pfn = (void *)(&cuMemcpyAtoH);
-#pragma push_macro("cuMemcpyHtoA")
-#undef cuMemcpyHtoA
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuMemcpyHtoA)) == 0) {
-#pragma pop_macro("cuMemcpyHtoA")
-        *pfn = (void *)(&hook_cuMemcpyHtoA);
-#pragma push_macro("cuLaunchKernel")
-#undef cuLaunchKernel
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuLaunchKernel)) == 0) { 
-#pragma pop_macro("cuLaunchKernel")
-        *pfn = (void *)(&hook_cuLaunchKernel);
-#pragma push_macro("cuLaunchCooperativeKernel")
-#undef cuLaunchCooperativeKernel
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuLaunchCooperativeKernel)) == 0) {
-#pragma pop_macro("cuLaunchCooperativeKernel")
-        *pfn = (void *)(&hook_cuLaunchCooperativeKernel);
-#pragma push_macro("cuArrayCreate")
-#undef cuArrayCreate
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuArrayCreate)) == 0) {
-#pragma pop_macro("cuArrayCreate")
-        *pfn = (void *)(&hook_cuArrayCreate);
-#pragma push_macro("cuArray3DCreate")
-#undef cuArray3DCreate
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuArray3DCreate)) == 0) {
-#pragma pop_macro("cuArray3DCreate")
-        *pfn = (void *)(&hook_cuArray3DCreate);
-#pragma push_macro("cuMipmappedArrayCreate")
-#undef cuMipmappedArrayCreate
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuMipmappedArrayCreate)) == 0) {
-#pragma pop_macro("cuMipmappedArrayCreate")
-        *pfn = (void *)(&hook_cuMipmappedArrayCreate);
-#pragma push_macro("cuArrayDestroy")
-#undef cuArrayDestroy
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuArrayDestroy)) == 0) {
-#pragma pop_macro("cuArrayDestroy")
-        *pfn = (void *)(&hook_cuArrayDestroy);
-#pragma push_macro("cuMipmappedArrayDestroy")
-#undef cuMipmappedArrayDestroy
-    } else if  (strcmp(symbol, CUDA_SYMBOL_STRING(cuMipmappedArrayDestroy)) == 0) {
-#pragma pop_macro("cuMipmappedArrayDestroy")
-        *pfn = (void *)(&cuMipmappedArrayDestroy);
-    }
-
-
-
-
-    
-#ifdef _DEBUG
-    //printf("Leave %s\n", SYMBOL_STRING(cuGetProcAddress));
-#endif
-    return (result);
-}
-
-//generate hook for cuda >= 11.3
-#define CU_HOOK_GENERATE_INTERCEPT_v1(hooksymbol, funcname, params, ...)                     \
+#define CU_HOOK_GENERATE_INTERCEPT(hooksymbol, funcname, params, ...)                     \
   CUresult CUDAAPI funcname params {                                                      \
     if (hook_inf.debug_mode) DEBUG("hooked function: " CUDA_SYMBOL_STRING(hooksymbol));   \
     pthread_once(&init_done, initialize);                                                 \
@@ -972,61 +696,79 @@ CUresult CUDAAPI cuGetProcAddress(const char *symbol, void **pfn, int cudaVersio
     return (result);                                                                      \
   }
 
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEMCPY_ATOH, cuMemcpyAtoH,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEMCPY_ATOH, cuMemcpyAtoH,
                            (void *dstHost, CUarray srcArray, size_t srcOffset, size_t ByteCount),
                            dstHost, srcArray, srcOffset, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEMCPY_DTOH, cuMemcpyDtoH,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEMCPY_DTOH, cuMemcpyDtoH,
                            (void *dstHost, CUdeviceptr srcDevice, size_t ByteCount), dstHost,
                            srcDevice, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEMCPY_HTOA, cuMemcpyHtoA,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEMCPY_HTOA, cuMemcpyHtoA,
                            (CUarray dstArray, size_t dstOffset, const void *srcHost,
                             size_t ByteCount),
                            dstArray, dstOffset, srcHost, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEMCPY_HTOD, cuMemcpyHtoD,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEMCPY_HTOD, cuMemcpyHtoD,
                            (CUdeviceptr dstDevice, const void *srcHost, size_t ByteCount),
                            dstDevice, srcHost, ByteCount)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_CTX_SYNC, cuCtxSynchronize, (void))
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_CTX_SYNC, cuCtxSynchronize, (void))
 
 // cuda driver alloc/free APIs
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEM_ALLOC, cuMemAlloc, (CUdeviceptr * dptr, size_t bytesize),
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEM_ALLOC, cuMemAlloc, (CUdeviceptr * dptr, size_t bytesize),
                            dptr, bytesize)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEM_ALLOC_MANAGED, cuMemAllocManaged,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEM_ALLOC_MANAGED, cuMemAllocManaged,
                            (CUdeviceptr * dptr, size_t bytesize, unsigned int flags), dptr,
                            bytesize, flags)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEM_ALLOC_PITCH, cuMemAllocPitch,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEM_ALLOC_PITCH, cuMemAllocPitch,
                            (CUdeviceptr * dptr, size_t *pPitch, size_t WidthInBytes, size_t Height,
                             unsigned int ElementSizeBytes),
                            dptr, pPitch, WidthInBytes, Height, ElementSizeBytes)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MEM_FREE, cuMemFree, (CUdeviceptr dptr), dptr)
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MEM_FREE, cuMemFree, (CUdeviceptr dptr), dptr)
 
 // cuda driver array/array_destroy APIs
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_ARRAY_CREATE, cuArrayCreate,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_ARRAY_CREATE, cuArrayCreate,
                            (CUarray * pHandle, const CUDA_ARRAY_DESCRIPTOR *pAllocateArray),
                            pHandle, pAllocateArray)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_ARRAY3D_CREATE, cuArray3DCreate,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_ARRAY3D_CREATE, cuArray3DCreate,
                            (CUarray * pHandle, const CUDA_ARRAY3D_DESCRIPTOR *pAllocateArray),
                            pHandle, pAllocateArray)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MIPMAPPED_ARRAY_CREATE, cuMipmappedArrayCreate,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MIPMAPPED_ARRAY_CREATE, cuMipmappedArrayCreate,
                            (CUmipmappedArray * pHandle,
                             const CUDA_ARRAY3D_DESCRIPTOR *pMipmappedArrayDesc,
                             unsigned int numMipmapLevels),
                            pHandle, pMipmappedArrayDesc, numMipmapLevels)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_ARRAY_DESTROY, cuArrayDestroy, (CUarray hArray), hArray)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_MIPMAPPED_ARRAY_DESTROY, cuMipmappedArrayDestroy,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_ARRAY_DESTROY, cuArrayDestroy, (CUarray hArray), hArray)
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_MIPMAPPED_ARRAY_DESTROY, cuMipmappedArrayDestroy,
                            (CUmipmappedArray hMipmappedArray), hMipmappedArray)
 
 // cuda driver kernel launch APIs
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_LAUNCH_KERNEL, cuLaunchKernel,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_LAUNCH_KERNEL, cuLaunchKernel,
                            (CUfunction f, unsigned int gridDimX, unsigned int gridDimY,
                             unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
                             unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream,
                             void **kernelParams, void **extra),
                            f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                            sharedMemBytes, hStream, kernelParams, extra)
-CU_HOOK_GENERATE_INTERCEPT_v1(CU_HOOK_LAUNCH_COOPERATIVE_KERNEL, cuLaunchCooperativeKernel,
+CU_HOOK_GENERATE_INTERCEPT(CU_HOOK_LAUNCH_COOPERATIVE_KERNEL, cuLaunchCooperativeKernel,
                            (CUfunction f, unsigned int gridDimX, unsigned int gridDimY,
                             unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
                             unsigned int blockDimZ, unsigned int sharedMemBytes, CUstream hStream,
                             void **kernelParams),
                            f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                            sharedMemBytes, hStream, kernelParams)
+
+// cuda driver mem info APIs
+CUresult CUDAAPI cuDeviceTotalMem(size_t *bytes, CUdevice dev) {
+  pthread_once(&init_done, initialize);
+  auto mem_info = get_gpu_memory_info();
+  if (hook_inf.debug_mode) hook_inf.call_count[CU_HOOK_DEVICE_TOTOAL_MEM]++;
+  *bytes = mem_info.second;
+  return CUDA_SUCCESS;
+}
+
+CUresult CUDAAPI cuMemGetInfo(size_t *gpu_mem_free, size_t *gpu_mem_total) {
+  pthread_once(&init_done, initialize);
+  auto mem_info = get_gpu_memory_info();
+  if (hook_inf.debug_mode) hook_inf.call_count[CU_HOOK_MEM_INFO]++;
+  *gpu_mem_free = mem_info.first;
+  *gpu_mem_total = mem_info.second;
+  return CUDA_SUCCESS;
+}

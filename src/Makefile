@@ -17,7 +17,7 @@ CUDA_PATH ?= /usr/local/cuda-10.0
 PWD := $(shell pwd)
 PREFIX ?= $(PWD)/..
 
-SMS ?= 30 35 37 50 52 60 61 70
+SMS ?=  35 37 50 52 60 61 70
 GENCODE_FLAGS += $(foreach sm,$(SMS),-gencode arch=compute_$(sm),code=sm_$(sm))
 
 CXX ?= g++

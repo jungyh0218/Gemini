@@ -39,7 +39,7 @@ def main():
     client_env['POD_MANAGER_IP'] = args.ip
     client_env['POD_MANAGER_PORT'] = args.port
     client_env['POD_NAME'] = args.name
-    client_env['LD_PRELOAD'] = "{}/gemini/lib/libgemhook.so.1".format(Path.home())
+    client_env['LD_PRELOAD'] = "/home/cjobr/develop/test/lib/libgemhook.so.1"
 
     proc = sp.Popen(
         args.command, env=client_env, start_new_session=True, universal_newlines=True, bufsize=1

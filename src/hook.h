@@ -19,6 +19,7 @@
 #include <cuda.h>
 
 typedef enum HookSymbolsEnum {
+  CU_HOOK_GET_PROC_ADDRESS,
   CU_HOOK_MEM_ALLOC,
   CU_HOOK_MEM_ALLOC_MANAGED,
   CU_HOOK_MEM_ALLOC_PITCH,
@@ -40,7 +41,8 @@ typedef enum HookSymbolsEnum {
   CU_HOOK_MEMCPY_DTOH,
   CU_HOOK_MEMCPY_HTOA,
   CU_HOOK_MEMCPY_HTOD,
-  NUM_HOOK_SYMBOLS,
+  NUM_HOOK_SYMBOLS
+  
 } HookSymbols;
 
 #endif /* _CUHOOK_H_ */
