@@ -53,9 +53,15 @@ By default scheduler uses port `50051`, and pod managers use ports starting from
 
 For more details, refer to those scripts and source code.
 
+
+## Support for CUDA >= 11.3
+Since there are some new features in CUDA 11.3, we need to modify the hook mechanism of Gemini.
+The detail can refer to https://forums.developer.nvidia.com/t/how-to-hook-cuda-runtime-api-in-cuda-11-4/190050/8?u=etlin
+The hook code example can be found in src/cudahook.cpp
 ## Contributors
 
 [jim90247](https://github.com/jim90247)
 [eee4017](https://github.com/eee4017)
 [ncy9371](https://github.com/ncy9371)
+[cjobr](https://github.com/cjobr)
 
