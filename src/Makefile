@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # path to CUDA installation
-CUDA_PATH ?= /usr/local/cuda-10.0
+CUDA_PATH ?= /usr/local/cuda
 PWD := $(shell pwd)
 PREFIX ?= $(PWD)/..
 
