@@ -55,9 +55,10 @@ def main():
     parser.add_argument('--min_quota', type=float, default=20, help='minimum quota (ms)')
     parser.add_argument('--window', type=float, default=10000, help='time window (ms)')
     args = parser.parse_args()
-
+    print(args.config)
     with open(args.config) as f:
         lines = f.read().splitlines()
+        print(lines)
 
     n = int(lines[0])  # clients
     childs = []
